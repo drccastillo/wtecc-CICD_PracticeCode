@@ -15,15 +15,15 @@ jobs:
 
       - name: Allow PowerShell scripts
         run: Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope Process
-        shell: pwsh
+        shell: powershell
 
       - name: Run a one-line script
         run: echo "My user is ${vars.USERNAME}!"
-        shell: pwsh
+        shell: powershell
 
       - name: Run a one-line script
         run: echo "My password is ${secrets.PASSWORD}!"
-        shell: pwsh
+        shell: powershell
 
       - name: Install dependencies
         run: |
