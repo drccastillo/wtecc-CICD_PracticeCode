@@ -14,53 +14,53 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # Machine-wide policy so all PS sessions can run scripts (requires admin on runner)
-      - name: Allow PS scripts (machine-wide)
+      # --- Python install without actions/setup-python (GPO-safe) ---
+      - name: Install Python 3.11 (winget if available)
+        shell: cmd
+        run: |
+          where winget >NUL 2>&1
+          if %ERRORLEVEL%==0 (
+            echo Installing Python via winget...
+            powershell -NoProfile -ExecutionPolicy Bypass -Command "winget install --id Python.Python.3.11 -e --source winget --silent"
+          ) else (
+            echo winget not found. Downloading official installer...
+            curl -L -o python-3.11.9-amd64.exe https://www.python.org/ftp/python/3.11.9/python-3.11.9-amd64.exe
+            echo Running silent install...
+            start /wait python-3.11.9-amd64.exe /quiet InstallAllUsers=1 PrependPath=1 Include_test=0
+          )
+          echo Verifying Python...
+          python --version
+          where python
+
+      # --- If you need to run your repo PowerShell script, do it via cmd + Bypass ---
+      - name: Run setup.ps1 (bypass policy)
         shell: cmd
         run: >
           powershell -NoProfile -ExecutionPolicy Bypass -Command
-          "Set-ExecutionPolicy -Scope LocalMachine -ExecutionPolicy RemoteSigned -Force;
-           Get-ExecutionPolicy -List"
+          "if (Test-Path \"$env:GITHUB_WORKSPACE\\setup.ps1\") {
+             Unblock-File -Path \"$env:GITHUB_WORKSPACE\\setup.ps1\" -ErrorAction SilentlyContinue;
+             & \"$env:GITHUB_WORKSPACE\\setup.ps1\"
+           } else {
+             Write-Error 'setup.ps1 not found'
+           }"
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
+      - name: Echo username (safe)
+        shell: cmd
+        run: echo My user is ${{ vars.USERNAME }}!
 
-      - name: Echo username (GitHub var)
-        shell: powershell
-        run: echo "My user is ${{ vars.USERNAME }}!"
-
-      # ❗Avoid printing secrets; mask and only confirm presence
-      - name: Mask and confirm secret is present
-        shell: powershell
-        run: |
-          echo "::add-mask::${{ secrets.PASSWORD }}"
-          if ("${{ secrets.PASSWORD }}".Length -gt 0) {
-            echo "PASSWORD is set (length: $(${{ secrets.PASSWORD }}.Length))"
-          } else {
-            echo "PASSWORD is NOT set" ; exit 1
-          }
-
-      # Run your repo script normally now that policy is set
-      - name: Run setup.ps1
-        shell: powershell
-        run: |
-          $script = Join-Path $env:GITHUB_WORKSPACE 'setup.ps1'
-          if (Test-Path $script) { & $script } else { Write-Error "setup.ps1 not found" }
-
+      # --- Python tasks (cmd shell) ---
       - name: Install dependencies
-        shell: powershell
+        shell: cmd
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
       - name: Lint with flake8
-        shell: powershell
+        shell: cmd
         run: |
           flake8 service --count --select=E9,F63,F7,F82 --show-source --statistics
           flake8 service --count --max-complexity=10 --max-line-length=127 --statistics
 
       - name: Run unit tests with nose
-        shell: powershell
+        shell: cmd
         run: nosetests -v --with-spec --spec-color --with-coverage --cover-package=app
