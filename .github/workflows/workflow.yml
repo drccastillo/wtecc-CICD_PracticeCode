@@ -36,13 +36,14 @@ jobs:
       - name: Run setup.ps1 (bypass policy)
         shell: cmd
         run: >
-          powershell -NoProfile -ExecutionPolicy Bypass -Command
-          "if (Test-Path \"$env:GITHUB_WORKSPACE\\setup.ps1\") {
-             Unblock-File -Path \"$env:GITHUB_WORKSPACE\\setup.ps1\" -ErrorAction SilentlyContinue;
-             & \"$env:GITHUB_WORKSPACE\\setup.ps1\"
-           } else {
-             Write-Error 'setup.ps1 not found'
-           }"
+          powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+            "if (Test-Path \"$env:GITHUB_WORKSPACE\\setup.ps1\") {;
+              Unblock-File -Path \"$env:GITHUB_WORKSPACE\\setup.ps1\" -ErrorAction SilentlyContinue; ;
+              & \"$env:GITHUB_WORKSPACE\\setup.ps1\" ;
+            } else {;
+              Write-Error 'setup.ps1 not found' ;
+            }"
+
 
       - name: Echo username (safe)
         shell: cmd
