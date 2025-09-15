@@ -14,32 +14,60 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # --- Python install without actions/setup-python (GPO-safe) ---
-      - name: Install Python 3.11 (winget if available)
+      # ✅ Instala Python 3.11 portable (embeddable zip)
+      - name: Provision portable Python 3.11
         shell: cmd
         run: |
-          where winget >NUL 2>&1
-          if %ERRORLEVEL%==0 (
-            echo Installing Python via winget...
-            powershell -NoProfile -ExecutionPolicy Bypass -Command "winget install --id Python.Python.3.11 -e --source winget --silent"
-          ) else (
-            echo winget not found. Downloading official installer...
-            curl -L -o python-3.11.9-amd64.exe https://www.python.org/ftp/python/3.11.9/python-3.11.9-amd64.exe
-            echo Running silent install...
-            start /wait python-3.11.9-amd64.exe /quiet InstallAllUsers=1 PrependPath=1 Include_test=0
-          )
-          echo Verifying Python...
-          python3 --version
+          set PY311_URL=https://www.python.org/ftp/python/3.11.9/python-3.11.9-embed-amd64.zip
+          set PY311_DIR=%RUNNER_TEMP%\py311
+          set PY311_ZIP=%RUNNER_TEMP%\py311.zip
+
+          echo Downloading embeddable Python...
+          curl -L -o "%PY311_ZIP%" "%PY311_URL%"
+
+          echo Extracting...
+          powershell -NoProfile -ExecutionPolicy Bypass -Command "Expand-Archive -Path '%PY311_ZIP%' -DestinationPath '%PY311_DIR%' -Force"
+
+          echo Enabling site module...
+          echo import site>>"%PY311_DIR%\python311._pth"
+
+          echo Bootstrapping pip...
+          curl -L -o "%RUNNER_TEMP%\get-pip.py" https://bootstrap.pypa.io/get-pip.py
+          "%PY311_DIR%\python.exe" "%RUNNER_TEMP%\get-pip.py"
+
+          echo Adding Python to PATH...
+          echo %PY311_DIR%>>%GITHUB_PATH%
+          echo %PY311_DIR%\Scripts>>%GITHUB_PATH%
+
+          echo Verifying installation...
+          "%PY311_DIR%\python.exe" --version
+          "%PY311_DIR%\python.exe" -m pip --version
+
+      - name: Show Python in PATH
+        shell: cmd
+        run: |
           where python
-      - name: Echo username (safe)
+          python --version
+          pip --version
+
+      - name: Echo username
         shell: cmd
         run: echo My user is ${{ vars.USERNAME }}!
 
-      # --- Python tasks (cmd shell) ---
+      - name: Mask and confirm secret is present
+        shell: cmd
+        run: |
+          echo ::add-mask::${{ secrets.PASSWORD }}
+          if not "${{ secrets.PASSWORD }}"=="" (
+            echo PASSWORD is set
+          ) else (
+            echo PASSWORD is NOT set && exit /b 1
+          )
+
       - name: Install dependencies
         shell: cmd
         run: |
-          python3 -m pip install --upgrade pip
+          python -m pip install --upgrade pip
           pip install -r requirements.txt
 
       - name: Lint with flake8
