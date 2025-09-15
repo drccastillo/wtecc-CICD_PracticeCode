@@ -14,34 +14,34 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # ✅ Provisiona Python 3.10 portable (no admin, GPO-safe, compatible con nose)
-      - name: Provision portable Python 3.10 (nose-friendly)
+      # ✅ Instala Python 3.11 portable (embeddable zip)
+      - name: Provision portable Python 3.10
         shell: cmd
         run: |
-          set PY_URL=https://www.python.org/ftp/python/3.10.14/python-3.10.14-embed-amd64.zip
-          set PY_DIR=%RUNNER_TEMP%\py310
-          set PY_ZIP=%RUNNER_TEMP%\py310.zip
+          set PY310_URL=https://www.python.org/ftp/python/3.10.9/python-3.10.9-embed-amd64.zip
+          set PY310_DIR=%RUNNER_TEMP%\py310
+          set PY310_ZIP=%RUNNER_TEMP%\py310.zip
 
-          echo Downloading embeddable Python 3.10...
-          curl -L -o "%PY_ZIP%" "%PY_URL%"
+          echo Downloading embeddable Python...
+          curl -L -o "%PY310_ZIP%" "%PY310_URL%"
 
           echo Extracting...
-          powershell -NoProfile -ExecutionPolicy Bypass -Command "Expand-Archive -Path '%PY_ZIP%' -DestinationPath '%PY_DIR%' -Force"
+          powershell -NoProfile -ExecutionPolicy Bypass -Command "Expand-Archive -Path '%PY310_ZIP%' -DestinationPath '%PY310_DIR%' -Force"
 
           echo Enabling site module...
-          echo import site>>"%PY_DIR%\python310._pth"
+          echo import site>>"%PY310_DIR%\python310._pth"
 
           echo Bootstrapping pip...
           curl -L -o "%RUNNER_TEMP%\get-pip.py" https://bootstrap.pypa.io/get-pip.py
-          "%PY_DIR%\python.exe" "%RUNNER_TEMP%\get-pip.py"
+          "%PY310_DIR%\python.exe" "%RUNNER_TEMP%\get-pip.py"
 
           echo Adding Python to PATH...
-          echo %PY_DIR%>>%GITHUB_PATH%
-          echo %PY_DIR%\Scripts>>%GITHUB_PATH%
+          echo %PY310_DIR%>>%GITHUB_PATH%
+          echo %PY310_DIR%\Scripts>>%GITHUB_PATH%
 
-          echo Verifying...
-          "%PY_DIR%\python.exe" --version
-          "%PY_DIR%\python.exe" -m pip --version
+          echo Verifying installation...
+          "%PY310_DIR%\python.exe" --version
+          "%PY310_DIR%\python.exe" -m pip --version
 
       - name: Show Python in PATH
         shell: cmd
@@ -78,4 +78,4 @@ jobs:
 
       - name: Run unit tests with nose
         shell: cmd
-        run: nosetests -v --with-spec --spec-color --with-coverage --cover-package=app --cover-package=service
+        run: nosetests -v --with-spec --spec-color --with-coverage --cover-package=app
