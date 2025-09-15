@@ -13,11 +13,17 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v3
 
-      - name: Run a one-line script
-        run: echo My user is ${vars.USERNAME}!
+      - name: Allow PowerShell scripts
+        run: Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope Process
+        shell: pwsh
 
       - name: Run a one-line script
-        run: echo My password is ${secrets.PASSWORD}!
+        run: echo "My user is ${vars.USERNAME}!"
+        shell: pwsh
+
+      - name: Run a one-line script
+        run: echo "My password is ${secrets.PASSWORD}!"
+        shell: pwsh
 
       - name: Install dependencies
         run: |
