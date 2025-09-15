@@ -8,11 +8,16 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
-    container: python:3.9-slim
+    runs-on: self-hosted
     steps:
       - name: Checkout
         uses: actions/checkout@v3
+
+      - name: Run a one-line script
+        run: echo My user is ${vars.USERNAME}!
+
+      - name: Run a one-line script
+        run: echo My password is ${secrets.PASSWORD}!
 
       - name: Install dependencies
         run: |
