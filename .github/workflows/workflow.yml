@@ -14,7 +14,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # (Optional) Ensure Python is available on the runner
+      # Needed so actions/setup-python can run its own setup.ps1 in a new PowerShell process
+      - name: Allow scripts for CurrentUser (once per runner user)
+        shell: powershell
+        run: |
+          Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned -Force
+          Get-ExecutionPolicy -List
+
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
@@ -35,7 +41,8 @@ jobs:
             echo "PASSWORD is NOT set" ; exit 1
           }
 
-      - name: Run setup.ps1 (bypass policy safely)
+      # If you also need to run your own setup.ps1 from the repo, keep this (bypasses policy safely)
+      - name: Run setup.ps1 (repo script, optional)
         shell: powershell
         run: |
           powershell -NoProfile -ExecutionPolicy Bypass -Command ^
