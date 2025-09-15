@@ -14,12 +14,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # Needed so actions/setup-python can run its own setup.ps1 in a new PowerShell process
-      - name: Allow scripts for CurrentUser (once per runner user)
-        shell: powershell
-        run: |
-          Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned -Force
-          Get-ExecutionPolicy -List
+      # Machine-wide policy so all PS sessions can run scripts (requires admin on runner)
+      - name: Allow PS scripts (machine-wide)
+        shell: cmd
+        run: >
+          powershell -NoProfile -ExecutionPolicy Bypass -Command
+          "Set-ExecutionPolicy -Scope LocalMachine -ExecutionPolicy RemoteSigned -Force;
+           Get-ExecutionPolicy -List"
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -30,7 +31,7 @@ jobs:
         shell: powershell
         run: echo "My user is ${{ vars.USERNAME }}!"
 
-      # ❗ Avoid printing secrets. If you need to confirm it's set, mask it and print length.
+      # ❗Avoid printing secrets; mask and only confirm presence
       - name: Mask and confirm secret is present
         shell: powershell
         run: |
@@ -41,13 +42,12 @@ jobs:
             echo "PASSWORD is NOT set" ; exit 1
           }
 
-      # If you also need to run your own setup.ps1 from the repo, keep this (bypasses policy safely)
-      - name: Run setup.ps1 (repo script, optional)
+      # Run your repo script normally now that policy is set
+      - name: Run setup.ps1
         shell: powershell
         run: |
-          powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-            "Unblock-File -Path '$env:GITHUB_WORKSPACE\setup.ps1' -ErrorAction SilentlyContinue; ^
-             & '$env:GITHUB_WORKSPACE\setup.ps1'"
+          $script = Join-Path $env:GITHUB_WORKSPACE 'setup.ps1'
+          if (Test-Path $script) { & $script } else { Write-Error "setup.ps1 not found" }
 
       - name: Install dependencies
         shell: powershell
