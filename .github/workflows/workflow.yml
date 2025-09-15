@@ -33,16 +33,12 @@ jobs:
           where python
 
       # --- If you need to run your repo PowerShell script, do it via cmd + Bypass ---
-      - name: Run setup.ps1 (bypass policy)
+      - name: Run setup.ps1 (bypass policy, simple)
         shell: cmd
         run: >
-          powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-            "if (Test-Path \"$env:GITHUB_WORKSPACE\\setup.ps1\") {;
-              Unblock-File -Path \"$env:GITHUB_WORKSPACE\\setup.ps1\" -ErrorAction SilentlyContinue; ;
-              & \"$env:GITHUB_WORKSPACE\\setup.ps1\" ;
-            } else {;
-              Write-Error 'setup.ps1 not found' ;
-            }"
+          powershell -NoProfile -ExecutionPolicy Bypass
+          -File "%GITHUB_WORKSPACE%\setup.ps1"
+
 
 
       - name: Echo username (safe)
