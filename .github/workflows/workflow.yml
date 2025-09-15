@@ -18,7 +18,7 @@ jobs:
       - name: Provision portable Python 3.9
         shell: cmd
         run: |
-          set py39_URL=https://www.python.org/ftp/python/3.9.23/python-3.9.23.tar.xz
+          set py39_URL=https://www.python.org/ftp/python/3.9.13/python-3.9.13-embed-amd64.zip
           set py39_DIR=%RUNNER_TEMP%\py39
           set py39_ZIP=%RUNNER_TEMP%\py39.zip
 
