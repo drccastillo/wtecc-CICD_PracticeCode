@@ -31,16 +31,6 @@ jobs:
           echo Verifying Python...
           python --version
           where python
-
-      # --- If you need to run your repo PowerShell script, do it via cmd + Bypass ---
-      - name: Run setup.ps1 (bypass policy, simple)
-        shell: cmd
-        run: >
-          powershell -NoProfile -ExecutionPolicy Bypass
-          -File "%GITHUB_WORKSPACE%\setup.ps1"
-
-
-
       - name: Echo username (safe)
         shell: cmd
         run: echo My user is ${{ vars.USERNAME }}!
