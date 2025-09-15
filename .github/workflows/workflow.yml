@@ -20,10 +20,6 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Allow PowerShell scripts (session only)
-        shell: powershell
-        run: Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope Process -Force
-
       - name: Echo username (GitHub var)
         shell: powershell
         run: echo "My user is ${{ vars.USERNAME }}!"
@@ -38,6 +34,13 @@ jobs:
           } else {
             echo "PASSWORD is NOT set" ; exit 1
           }
+
+      - name: Run setup.ps1 (bypass policy safely)
+        shell: powershell
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+            "Unblock-File -Path '$env:GITHUB_WORKSPACE\setup.ps1' -ErrorAction SilentlyContinue; ^
+             & '$env:GITHUB_WORKSPACE\setup.ps1'"
 
       - name: Install dependencies
         shell: powershell
