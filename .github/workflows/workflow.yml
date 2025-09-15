@@ -29,7 +29,7 @@ jobs:
             start /wait python-3.11.9-amd64.exe /quiet InstallAllUsers=1 PrependPath=1 Include_test=0
           )
           echo Verifying Python...
-          python --version
+          python3 --version
           where python
       - name: Echo username (safe)
         shell: cmd
@@ -39,7 +39,7 @@ jobs:
       - name: Install dependencies
         shell: cmd
         run: |
-          python -m pip install --upgrade pip
+          python3 -m pip install --upgrade pip
           pip install -r requirements.txt
 
       - name: Lint with flake8
