@@ -140,3 +140,52 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+# Docker environment variables (sensitive data)
+.env
+
+# Docker build cache and volumes
+.docker/
+
+# VS Code workspace settings (optional, some teams commit these)
+.vscode/settings.json
+.vscode/launch.json
+.vscode/tasks.json
+
+# JetBrains IDEs
+.idea/
+*.iml
+
+# Temporary files
+*.tmp
+*.temp
+*.swp
+*.swo
+*~
+
+# Log files
+*.log
+logs/
+
+# Coverage reports (if using different tools)
+htmlcov/
+.coverage.*
+coverage.xml
+*.cover
+.hypothesis/
+.pytest_cache/
+
+# Database files (if any)
+*.db
+*.sqlite
+*.sqlite3
+
+# Backup files
+*.bak
+*.backup
+
+# OS generated files
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/

@@ -1,8 +1,14 @@
 # Files we don't want in our Docker image
 .git/
 lessons/
+labs/
 Vagrantfile
 Dockerfile
+
+# Docker deployment scripts
+docker-deploy.sh
+setup-docker-env.sh
+.env.example
 
 # Local environment
 .DS_Store
