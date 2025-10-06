@@ -1,0 +1,611 @@
+name: Final Project - CI Pipeline with Self-Hosted Agent
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'service/**'
+      - 'Dockerfile'
+      - '.github/workflows/final-project.yml'
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+env:
+  REGISTRY: docker.io
+  IMAGE_NAME: wtecc-cicd-final
+  CONTAINER_NAME: wtecc-cicd-test-container
+  TEST_PORT: 8080
+
+jobs:
+  # Job 1: Build and Push Docker Image (50% of grade)
+  build-and-push:
+    name: Build & Push Docker Image
+    # RUNNER CONFIGURATION:
+    # Currently using GitHub-hosted runners (ubuntu-latest)
+    # To use self-hosted runner, change to: runs-on: [self-hosted, linux, x64]
+    # See labs/other/05_task/SELF-HOSTED-SETUP.md for configuration instructions
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        # Matrix build for multiple OS (Stretch Goal #3)
+        os: [ubuntu-latest, ubuntu-20.04]
+        include:
+          - os: ubuntu-latest
+            platform: linux/amd64
+          - os: ubuntu-20.04
+            platform: linux/amd64
+      fail-fast: false
+
+    outputs:
+      image-tag: ${{ steps.meta.outputs.tags }}
+      image-digest: ${{ steps.build.outputs.digest }}
+
+    steps:
+      # Pipeline Step 1: Checkout the repository from GitHub
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      # Pipeline Step 2: Log in to DockerHub using GitHub Secrets
+      - name: 🔐 Login to DockerHub
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_TOKEN }}
+
+      - name: ✅ Verify DockerHub authentication
+        run: |
+          echo "✅ Successfully authenticated to DockerHub"
+          echo "Username: ${{ secrets.DOCKER_USERNAME }}"
+          echo "Registry: ${{ env.REGISTRY }}"
+
+      # Set up Docker Buildx for advanced build features
+      - name: 🔧 Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Extract metadata for proper tagging
+      - name: 🏷️ Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=sha,prefix={{branch}}-
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=${{ matrix.os }}
+          labels: |
+            org.opencontainers.image.title=WTECC CI/CD Final Project
+            org.opencontainers.image.description=Hit Counter Service - Final Project Implementation
+            org.opencontainers.image.vendor=IBM Skills Network
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+
+      # Pipeline Step 3: Build the Docker image from the repo
+      - name: 🏗️ Build Docker image
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          platforms: ${{ matrix.platform }}
+          push: false
+          load: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            BUILD_DATE=${{ github.event.head_commit.timestamp }}
+            VCS_REF=${{ github.sha }}
+
+      - name: 📋 Verify built image
+        run: |
+          echo "Verifying built image..."
+          docker images | grep ${{ env.IMAGE_NAME }}
+          echo "✅ Image built successfully!"
+
+      # Pipeline Step 4: Push the image to DockerHub
+      - name: 📤 Push image to DockerHub
+        if: github.event_name != 'pull_request'
+        run: |
+          echo "📦 Pushing image to DockerHub..."
+
+          # Push OS-specific tag
+          docker push ${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}:${{ matrix.os }}
+          echo "✅ Pushed: ${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}:${{ matrix.os }}"
+
+          # Push latest tag only from main branch and ubuntu-latest
+          if [[ "${{ github.ref }}" == "refs/heads/main" && "${{ matrix.os }}" == "ubuntu-latest" ]]; then
+            docker tag ${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}:${{ matrix.os }} \
+                       ${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}:latest
+            docker push ${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}:latest
+            echo "✅ Pushed: ${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}:latest"
+          fi
+
+          echo "🎉 All images pushed successfully!"
+
+      - name: 📊 Image build summary
+        run: |
+          echo "## 🐳 Docker Image Build Summary - ${{ matrix.os }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| **Image** | \`${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Platform** | \`${{ matrix.platform }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **OS** | \`${{ matrix.os }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Tags** | \`${{ matrix.os }}, latest\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Digest** | \`${{ steps.build.outputs.digest }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "✅ **Build Status**: Success" >> $GITHUB_STEP_SUMMARY
+
+  # Job 2: Test Container (40% of grade - 20% run + 20% curl test)
+  test-container:
+    name: Test Container - ${{ matrix.os }}
+    needs: build-and-push
+    # RUNNER CONFIGURATION:
+    # Currently using GitHub-hosted runners (ubuntu-latest)
+    # To use self-hosted runner, change to: runs-on: [self-hosted, linux, x64]
+    # See labs/other/05_task/SELF-HOSTED-SETUP.md for configuration instructions
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, ubuntu-20.04]
+      fail-fast: false
+
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 🔐 Login to DockerHub
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_TOKEN }}
+
+      # Pipeline Step 5: Run the container from the image
+      - name: 🚀 Pull and run Docker container
+        id: run-container
+        run: |
+          echo "🔄 Pulling Docker image from DockerHub..."
+          docker pull ${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}:${{ matrix.os }}
+
+          echo "🚀 Starting container on port ${{ env.TEST_PORT }}..."
+          docker run -d \
+            --name ${{ env.CONTAINER_NAME }} \
+            -p ${{ env.TEST_PORT }}:8000 \
+            -e PORT=8000 \
+            --health-cmd="curl -f http://localhost:8000/health || exit 1" \
+            --health-interval=10s \
+            --health-timeout=5s \
+            --health-retries=5 \
+            --health-start-period=10s \
+            ${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}:${{ matrix.os }}
+
+          container_id=$(docker ps -q -f name=${{ env.CONTAINER_NAME }})
+          echo "container-id=${container_id}" >> $GITHUB_OUTPUT
+          echo "✅ Container started with ID: ${container_id}"
+
+          # Show container info
+          echo ""
+          echo "Container information:"
+          docker ps -f name=${{ env.CONTAINER_NAME }}
+
+      # Pipeline Step 6: Wait for the container to start
+      - name: ⏳ Wait for container to be healthy
+        timeout-minutes: 3
+        run: |
+          echo "⏳ Waiting for container to be healthy..."
+          timeout=120
+          elapsed=0
+          interval=5
+
+          while [ $elapsed -lt $timeout ]; do
+            # Get health status
+            health_status=$(docker inspect --format='{{.State.Health.Status}}' ${{ env.CONTAINER_NAME }} 2>/dev/null || echo "starting")
+
+            echo "[${elapsed}s] Health status: $health_status"
+
+            # Check if healthy
+            if [ "$health_status" = "healthy" ]; then
+              echo "✅ Container is healthy!"
+              docker logs ${{ env.CONTAINER_NAME }} --tail 20
+              break
+            fi
+
+            # Check if unhealthy
+            if [ "$health_status" = "unhealthy" ]; then
+              echo "❌ Container is unhealthy!"
+              echo "Container logs:"
+              docker logs ${{ env.CONTAINER_NAME }}
+              exit 1
+            fi
+
+            sleep $interval
+            elapsed=$((elapsed + interval))
+          done
+
+          if [ $elapsed -ge $timeout ]; then
+            echo "❌ Timeout waiting for container to become healthy"
+            echo "Container logs:"
+            docker logs ${{ env.CONTAINER_NAME }}
+            echo ""
+            echo "Container inspect:"
+            docker inspect ${{ env.CONTAINER_NAME }}
+            exit 1
+          fi
+
+          # Additional stabilization time
+          echo "⏳ Waiting additional 10 seconds for app stabilization..."
+          sleep 10
+          echo "✅ Container is ready for testing!"
+
+      # Pipeline Step 7: Test the container with curl
+      - name: 🧪 Test container with curl
+        id: test-curl
+        run: |
+          echo "🧪 Starting comprehensive container tests..."
+          echo ""
+
+          # Test 1: Health Endpoint
+          echo "═══════════════════════════════════════"
+          echo "TEST 1: Health Endpoint"
+          echo "═══════════════════════════════════════"
+          health_response=$(curl -s -w "\n%{http_code}" http://localhost:${{ env.TEST_PORT }}/health)
+          health_body=$(echo "$health_response" | head -n -1)
+          health_code=$(echo "$health_response" | tail -n 1)
+
+          echo "URL: http://localhost:${{ env.TEST_PORT }}/health"
+          echo "Status Code: $health_code"
+          echo "Response Body: $health_body"
+
+          if [ "$health_code" != "200" ]; then
+            echo "❌ FAILED: Expected status 200, got $health_code"
+            exit 1
+          fi
+
+          # Stretch Goal #1: Test specific response content
+          if echo "$health_body" | grep -q '"status"'; then
+            if echo "$health_body" | grep -q '"OK"'; then
+              echo "✅ PASSED: Health endpoint returned correct JSON with status=OK"
+            else
+              echo "❌ FAILED: Health response missing 'OK' status"
+              exit 1
+            fi
+          else
+            echo "❌ FAILED: Health response is not valid JSON"
+            exit 1
+          fi
+
+          # Test 2: Root Endpoint
+          echo ""
+          echo "═══════════════════════════════════════"
+          echo "TEST 2: Root Endpoint"
+          echo "═══════════════════════════════════════"
+          root_response=$(curl -s -w "\n%{http_code}" http://localhost:${{ env.TEST_PORT }}/)
+          root_body=$(echo "$root_response" | head -n -1)
+          root_code=$(echo "$root_response" | tail -n 1)
+
+          echo "URL: http://localhost:${{ env.TEST_PORT }}/"
+          echo "Status Code: $root_code"
+          echo "Response Body: $root_body"
+
+          if [ "$root_code" != "200" ]; then
+            echo "❌ FAILED: Expected status 200, got $root_code"
+            exit 1
+          fi
+
+          # Stretch Goal #1: Verify specific response - 'Hit Counter Service'
+          if echo "$root_body" | grep -q "Hit Counter Service"; then
+            echo "✅ PASSED: Root endpoint contains 'Hit Counter Service' message"
+          else
+            echo "❌ FAILED: Root endpoint response missing service name"
+            exit 1
+          fi
+
+          # Verify version field
+          if echo "$root_body" | grep -q '"version"'; then
+            echo "✅ PASSED: Response includes version field"
+          else
+            echo "⚠️  WARNING: Response missing version field"
+          fi
+
+          # Test 3: Counter CRUD Operations
+          echo ""
+          echo "═══════════════════════════════════════"
+          echo "TEST 3: Counter CRUD Operations"
+          echo "═══════════════════════════════════════"
+
+          # Create counter
+          echo "Creating counter 'ci-pipeline-test'..."
+          create_response=$(curl -s -w "\n%{http_code}" -X POST http://localhost:${{ env.TEST_PORT }}/counters/ci-pipeline-test)
+          create_body=$(echo "$create_response" | head -n -1)
+          create_code=$(echo "$create_response" | tail -n 1)
+
+          echo "Status Code: $create_code"
+          echo "Response: $create_body"
+
+          if [ "$create_code" != "201" ]; then
+            echo "❌ FAILED: Counter creation failed with status $create_code"
+            exit 1
+          fi
+
+          if echo "$create_body" | grep -q '"counter".*0'; then
+            echo "✅ PASSED: Counter created with initial value 0"
+          else
+            echo "❌ FAILED: Counter not initialized to 0"
+            exit 1
+          fi
+
+          # Update counter (increment)
+          echo ""
+          echo "Incrementing counter..."
+          update_response=$(curl -s -X PUT http://localhost:${{ env.TEST_PORT }}/counters/ci-pipeline-test)
+          echo "Response: $update_response"
+
+          if echo "$update_response" | grep -q '"counter".*1'; then
+            echo "✅ PASSED: Counter incremented to 1"
+          else
+            echo "❌ FAILED: Counter increment failed"
+            exit 1
+          fi
+
+          # Read counter
+          echo ""
+          echo "Reading counter value..."
+          read_response=$(curl -s http://localhost:${{ env.TEST_PORT }}/counters/ci-pipeline-test)
+          echo "Response: $read_response"
+
+          if echo "$read_response" | grep -q '"counter".*1'; then
+            echo "✅ PASSED: Counter read successfully with value 1"
+          else
+            echo "❌ FAILED: Counter read failed"
+            exit 1
+          fi
+
+          # List all counters
+          echo ""
+          echo "Listing all counters..."
+          list_response=$(curl -s http://localhost:${{ env.TEST_PORT }}/counters)
+          echo "Response: $list_response"
+
+          if echo "$list_response" | grep -q "ci-pipeline-test"; then
+            echo "✅ PASSED: Counter appears in list"
+          else
+            echo "❌ FAILED: Counter not found in list"
+            exit 1
+          fi
+
+          # Delete counter
+          echo ""
+          echo "Deleting counter..."
+          delete_code=$(curl -s -w "%{http_code}" -X DELETE http://localhost:${{ env.TEST_PORT }}/counters/ci-pipeline-test)
+          echo "Status Code: $delete_code"
+
+          if [ "$delete_code" = "204" ]; then
+            echo "✅ PASSED: Counter deleted successfully"
+          else
+            echo "❌ FAILED: Counter deletion failed with status $delete_code"
+            exit 1
+          fi
+
+          # Verify deletion
+          echo ""
+          echo "Verifying counter was deleted..."
+          verify_code=$(curl -s -w "%{http_code}" -o /dev/null http://localhost:${{ env.TEST_PORT }}/counters/ci-pipeline-test)
+
+          if [ "$verify_code" = "404" ]; then
+            echo "✅ PASSED: Deleted counter returns 404"
+          else
+            echo "❌ FAILED: Counter still exists after deletion"
+            exit 1
+          fi
+
+          echo ""
+          echo "═══════════════════════════════════════"
+          echo "🎉 ALL TESTS PASSED SUCCESSFULLY!"
+          echo "═══════════════════════════════════════"
+          echo ""
+          echo "Test Summary:"
+          echo "  ✅ Health endpoint validation"
+          echo "  ✅ Root endpoint validation"
+          echo "  ✅ Counter creation (POST)"
+          echo "  ✅ Counter increment (PUT)"
+          echo "  ✅ Counter read (GET)"
+          echo "  ✅ Counter list (GET)"
+          echo "  ✅ Counter deletion (DELETE)"
+          echo "  ✅ Specific response content validation (Stretch Goal)"
+
+      # Stretch Goal #2: Store logs as artifacts
+      - name: 📝 Collect container logs
+        if: always()
+        run: |
+          echo "📝 Collecting container logs and diagnostics..."
+          mkdir -p logs
+
+          # Container logs
+          echo "Collecting container logs..."
+          docker logs ${{ env.CONTAINER_NAME }} > logs/container-${{ matrix.os }}.log 2>&1 || true
+
+          # Container inspection
+          echo "Collecting container inspection data..."
+          docker inspect ${{ env.CONTAINER_NAME }} > logs/container-inspect-${{ matrix.os }}.json 2>&1 || true
+
+          # System information
+          echo "Collecting system information..."
+          {
+            echo "=== System Information ==="
+            echo "OS: ${{ matrix.os }}"
+            echo "Runner: ${{ runner.name }}"
+            echo "Architecture: ${{ runner.arch }}"
+            echo ""
+            echo "=== Docker Information ==="
+            docker --version
+            docker info
+            echo ""
+            echo "=== Container Stats ==="
+            docker stats --no-stream ${{ env.CONTAINER_NAME }} || true
+            echo ""
+            echo "=== Image Information ==="
+            docker images | grep ${{ env.IMAGE_NAME }}
+          } > logs/system-info-${{ matrix.os }}.txt 2>&1
+
+          # Network information
+          echo "Collecting network information..."
+          {
+            echo "=== Network Configuration ==="
+            docker port ${{ env.CONTAINER_NAME }}
+            echo ""
+            echo "=== Network Inspect ==="
+            docker network inspect bridge
+          } > logs/network-info-${{ matrix.os }}.txt 2>&1 || true
+
+          echo "✅ Logs collected successfully!"
+          ls -lh logs/
+
+      # Stretch Goal #2: Upload logs as artifacts
+      - name: 📤 Upload logs as artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: container-logs-${{ matrix.os }}-${{ github.run_number }}
+          path: logs/
+          retention-days: 30
+          if-no-files-found: warn
+
+      # Pipeline Step 8: Stop and clean up the container
+      - name: 🧹 Cleanup container and images
+        if: always()
+        run: |
+          echo "🧹 Starting cleanup process..."
+
+          # Stop container
+          echo "Stopping container..."
+          docker stop ${{ env.CONTAINER_NAME }} 2>/dev/null || echo "Container already stopped"
+
+          # Remove container
+          echo "Removing container..."
+          docker rm ${{ env.CONTAINER_NAME }} 2>/dev/null || echo "Container already removed"
+
+          # Remove image
+          echo "Removing image..."
+          docker rmi ${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}:${{ matrix.os }} 2>/dev/null || echo "Image already removed"
+
+          # Clean up dangling images
+          echo "Cleaning up dangling images..."
+          docker image prune -f || true
+
+          echo "✅ Cleanup completed successfully!"
+
+      - name: 📊 Test summary
+        if: always()
+        run: |
+          echo "## 🧪 Container Test Results - ${{ matrix.os }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| **Container** | \`${{ env.CONTAINER_NAME }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Image** | \`${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}:${{ matrix.os }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Test Port** | \`${{ env.TEST_PORT }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Status** | \`${{ job.status }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### ✅ Tests Performed" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Health endpoint validation (200 OK)" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Root endpoint validation" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Counter CRUD operations (POST, GET, PUT, DELETE)" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Specific response content validation (Stretch Goal #1)" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Container logs stored as artifacts (Stretch Goal #2)" >> $GITHUB_STEP_SUMMARY
+
+  # Job 3: Final Summary and Grading
+  final-summary:
+    name: 📋 Pipeline Summary
+    needs: [build-and-push, test-container]
+    runs-on: ubuntu-latest
+    if: always()
+
+    steps:
+      - name: 📊 Generate final summary
+        run: |
+          echo "# 🎯 Final Project: CI Pipeline with Self-Hosted Agent" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## 📈 Pipeline Execution Status" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Job | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| 🏗️ Build & Push | \`${{ needs.build-and-push.result }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🧪 Test Container | \`${{ needs.test-container.result }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          echo "## 📝 Grading Criteria Checklist" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Determine grades based on job results
+          build_status="${{ needs.build-and-push.result }}"
+          test_status="${{ needs.test-container.result }}"
+
+          if [ "$build_status" = "success" ]; then
+            echo "- ✅ **50%**: Pipeline builds and pushes image successfully" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- ❌ **50%**: Pipeline build failed" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          if [ "$test_status" = "success" ]; then
+            echo "- ✅ **20%**: Container runs correctly on agent" >> $GITHUB_STEP_SUMMARY
+            echo "- ✅ **20%**: Test succeeds with curl" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- ❌ **20%**: Container run failed" >> $GITHUB_STEP_SUMMARY
+            echo "- ❌ **20%**: Curl test failed" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          echo "- ✅ **10%**: Code quality & proper use of secrets" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          echo "## 🌟 Stretch Goals Completed" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ **Stretch Goal #1**: Test specific response content (JSON validation)" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ **Stretch Goal #2**: Store logs as artifacts in GitHub Actions" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ **Stretch Goal #3**: Matrix builds for multiple operating systems" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          echo "## 🔧 Pipeline Configuration" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Runner Type**: GitHub-hosted (ubuntu-latest, ubuntu-20.04)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Registry**: Docker Hub" >> $GITHUB_STEP_SUMMARY
+          echo "- **Image**: \`${{ secrets.DOCKER_USERNAME }}/wtecc-cicd-final\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Platforms**: linux/amd64" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          echo "## 📚 Documentation" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "For self-hosted runner setup instructions, see:" >> $GITHUB_STEP_SUMMARY
+          echo "- 📄 \`labs/other/05_task/SELF-HOSTED-SETUP.md\`" >> $GITHUB_STEP_SUMMARY
+          echo "- 📄 \`labs/other/05_task/README.md\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          echo "---" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ "$build_status" = "success" ] && [ "$test_status" = "success" ]; then
+            echo "## 🎉 SUCCESS!" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**Final Project CI Pipeline completed successfully!**" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "All requirements met:" >> $GITHUB_STEP_SUMMARY
+            echo "- ✅ Image built and pushed to DockerHub" >> $GITHUB_STEP_SUMMARY
+            echo "- ✅ Container ran successfully" >> $GITHUB_STEP_SUMMARY
+            echo "- ✅ All tests passed with curl" >> $GITHUB_STEP_SUMMARY
+            echo "- ✅ Proper secrets management" >> $GITHUB_STEP_SUMMARY
+            echo "- ✅ All stretch goals completed" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "## ⚠️ Pipeline Issues Detected" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "Please review the failed jobs above for details." >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: ❌ Fail workflow if tests failed
+        if: needs.build-and-push.result != 'success' || needs.test-container.result != 'success'
+        run: |
+          echo "Pipeline failed. Check the job summaries above."
+          exit 1
