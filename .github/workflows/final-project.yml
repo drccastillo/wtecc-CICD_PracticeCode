@@ -22,20 +22,9 @@ jobs:
   build-and-push:
     name: Build & Push Docker Image
     # RUNNER CONFIGURATION:
-    # Currently using GitHub-hosted runners (ubuntu-latest)
-    # To use self-hosted runner, change to: runs-on: [self-hosted, linux, x64]
+    # Using self-hosted runner
     # See labs/other/05_task/SELF-HOSTED-SETUP.md for configuration instructions
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        # Matrix build for multiple OS (Stretch Goal #3)
-        os: [ubuntu-latest, ubuntu-20.04]
-        include:
-          - os: ubuntu-latest
-            platform: linux/amd64
-          - os: ubuntu-20.04
-            platform: linux/amd64
-      fail-fast: false
+    runs-on: [self-hosted, linux, x64]
 
     outputs:
       image-tag: ${{ steps.meta.outputs.tags }}
@@ -75,7 +64,6 @@ jobs:
             type=ref,event=pr
             type=sha,prefix={{branch}}-
             type=raw,value=latest,enable={{is_default_branch}}
-            type=raw,value=${{ matrix.os }}
           labels: |
             org.opencontainers.image.title=WTECC CI/CD Final Project
             org.opencontainers.image.description=Hit Counter Service - Final Project Implementation
@@ -88,7 +76,7 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: .
-          platforms: ${{ matrix.platform }}
+          platforms: linux/amd64
           push: false
           load: true
           tags: ${{ steps.meta.outputs.tags }}
@@ -111,14 +99,14 @@ jobs:
         run: |
           echo "📦 Pushing image to DockerHub..."
 
-          # Push OS-specific tag
-          docker push ${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}:${{ matrix.os }}
-          echo "✅ Pushed: ${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}:${{ matrix.os }}"
+          # Get the first tag from metadata output
+          IMAGE_TAG=$(echo "${{ steps.meta.outputs.tags }}" | head -n1)
+          echo "Pushing image with tag: $IMAGE_TAG"
+          docker push $IMAGE_TAG
 
-          # Push latest tag only from main branch and ubuntu-latest
-          if [[ "${{ github.ref }}" == "refs/heads/main" && "${{ matrix.os }}" == "ubuntu-latest" ]]; then
-            docker tag ${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}:${{ matrix.os }} \
-                       ${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}:latest
+          # Push latest tag only from main branch
+          if [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
+            docker tag $IMAGE_TAG ${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}:latest
             docker push ${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}:latest
             echo "✅ Pushed: ${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}:latest"
           fi
@@ -127,31 +115,26 @@ jobs:
 
       - name: 📊 Image build summary
         run: |
-          echo "## 🐳 Docker Image Build Summary - ${{ matrix.os }}" >> $GITHUB_STEP_SUMMARY
+          echo "## 🐳 Docker Image Build Summary - Self-Hosted Runner" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
           echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
           echo "| **Image** | \`${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Platform** | \`${{ matrix.platform }}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| **OS** | \`${{ matrix.os }}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Tags** | \`${{ matrix.os }}, latest\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Platform** | \`linux/amd64\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Runner** | \`self-hosted\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Tags** | \`latest\` |" >> $GITHUB_STEP_SUMMARY
           echo "| **Digest** | \`${{ steps.build.outputs.digest }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "✅ **Build Status**: Success" >> $GITHUB_STEP_SUMMARY
 
   # Job 2: Test Container (40% of grade - 20% run + 20% curl test)
   test-container:
-    name: Test Container - ${{ matrix.os }}
+    name: Test Container
     needs: build-and-push
     # RUNNER CONFIGURATION:
-    # Currently using GitHub-hosted runners (ubuntu-latest)
-    # To use self-hosted runner, change to: runs-on: [self-hosted, linux, x64]
+    # Using self-hosted runner
     # See labs/other/05_task/SELF-HOSTED-SETUP.md for configuration instructions
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-latest, ubuntu-20.04]
-      fail-fast: false
+    runs-on: [self-hosted, linux, x64]
 
     steps:
       - name: 📥 Checkout repository
@@ -169,7 +152,7 @@ jobs:
         id: run-container
         run: |
           echo "🔄 Pulling Docker image from DockerHub..."
-          docker pull ${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}:${{ matrix.os }}
+          docker pull ${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}:latest
 
           echo "🚀 Starting container on port ${{ env.TEST_PORT }}..."
           docker run -d \
@@ -181,7 +164,7 @@ jobs:
             --health-timeout=5s \
             --health-retries=5 \
             --health-start-period=10s \
-            ${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}:${{ matrix.os }}
+            ${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}:latest
 
           container_id=$(docker ps -q -f name=${{ env.CONTAINER_NAME }})
           echo "container-id=${container_id}" >> $GITHUB_OUTPUT
@@ -426,17 +409,16 @@ jobs:
 
           # Container logs
           echo "Collecting container logs..."
-          docker logs ${{ env.CONTAINER_NAME }} > logs/container-${{ matrix.os }}.log 2>&1 || true
+          docker logs ${{ env.CONTAINER_NAME }} > logs/container-self-hosted.log 2>&1 || true
 
           # Container inspection
           echo "Collecting container inspection data..."
-          docker inspect ${{ env.CONTAINER_NAME }} > logs/container-inspect-${{ matrix.os }}.json 2>&1 || true
+          docker inspect ${{ env.CONTAINER_NAME }} > logs/container-inspect-self-hosted.json 2>&1 || true
 
           # System information
           echo "Collecting system information..."
           {
             echo "=== System Information ==="
-            echo "OS: ${{ matrix.os }}"
             echo "Runner: ${{ runner.name }}"
             echo "Architecture: ${{ runner.arch }}"
             echo ""
@@ -449,7 +431,7 @@ jobs:
             echo ""
             echo "=== Image Information ==="
             docker images | grep ${{ env.IMAGE_NAME }}
-          } > logs/system-info-${{ matrix.os }}.txt 2>&1
+          } > logs/system-info-self-hosted.txt 2>&1
 
           # Network information
           echo "Collecting network information..."
@@ -459,7 +441,7 @@ jobs:
             echo ""
             echo "=== Network Inspect ==="
             docker network inspect bridge
-          } > logs/network-info-${{ matrix.os }}.txt 2>&1 || true
+          } > logs/network-info-self-hosted.txt 2>&1 || true
 
           echo "✅ Logs collected successfully!"
           ls -lh logs/
@@ -469,7 +451,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: container-logs-${{ matrix.os }}-${{ github.run_number }}
+          name: container-logs-self-hosted-${{ github.run_number }}
           path: logs/
           retention-days: 30
           if-no-files-found: warn
@@ -490,7 +472,7 @@ jobs:
 
           # Remove image
           echo "Removing image..."
-          docker rmi ${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}:${{ matrix.os }} 2>/dev/null || echo "Image already removed"
+          docker rmi ${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}:latest 2>/dev/null || echo "Image already removed"
 
           # Clean up dangling images
           echo "Cleaning up dangling images..."
@@ -501,13 +483,14 @@ jobs:
       - name: 📊 Test summary
         if: always()
         run: |
-          echo "## 🧪 Container Test Results - ${{ matrix.os }}" >> $GITHUB_STEP_SUMMARY
+          echo "## 🧪 Container Test Results - Self-Hosted Runner" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
           echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
           echo "| **Container** | \`${{ env.CONTAINER_NAME }}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Image** | \`${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}:${{ matrix.os }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Image** | \`${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}:latest\` |" >> $GITHUB_STEP_SUMMARY
           echo "| **Test Port** | \`${{ env.TEST_PORT }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Runner** | \`self-hosted\` |" >> $GITHUB_STEP_SUMMARY
           echo "| **Status** | \`${{ job.status }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### ✅ Tests Performed" >> $GITHUB_STEP_SUMMARY
@@ -566,12 +549,11 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "- ✅ **Stretch Goal #1**: Test specific response content (JSON validation)" >> $GITHUB_STEP_SUMMARY
           echo "- ✅ **Stretch Goal #2**: Store logs as artifacts in GitHub Actions" >> $GITHUB_STEP_SUMMARY
-          echo "- ✅ **Stretch Goal #3**: Matrix builds for multiple operating systems" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
           echo "## 🔧 Pipeline Configuration" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "- **Runner Type**: GitHub-hosted (ubuntu-latest, ubuntu-20.04)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Runner Type**: Self-hosted (linux, x64)" >> $GITHUB_STEP_SUMMARY
           echo "- **Registry**: Docker Hub" >> $GITHUB_STEP_SUMMARY
           echo "- **Image**: \`${{ secrets.DOCKER_USERNAME }}/wtecc-cicd-final\`" >> $GITHUB_STEP_SUMMARY
           echo "- **Platforms**: linux/amd64" >> $GITHUB_STEP_SUMMARY
@@ -594,10 +576,10 @@ jobs:
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "All requirements met:" >> $GITHUB_STEP_SUMMARY
             echo "- ✅ Image built and pushed to DockerHub" >> $GITHUB_STEP_SUMMARY
-            echo "- ✅ Container ran successfully" >> $GITHUB_STEP_SUMMARY
+            echo "- ✅ Container ran successfully on self-hosted runner" >> $GITHUB_STEP_SUMMARY
             echo "- ✅ All tests passed with curl" >> $GITHUB_STEP_SUMMARY
             echo "- ✅ Proper secrets management" >> $GITHUB_STEP_SUMMARY
-            echo "- ✅ All stretch goals completed" >> $GITHUB_STEP_SUMMARY
+            echo "- ✅ Self-hosted runner configured and working" >> $GITHUB_STEP_SUMMARY
           else
             echo "## ⚠️ Pipeline Issues Detected" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
